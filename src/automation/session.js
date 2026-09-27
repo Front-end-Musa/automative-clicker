@@ -1,14 +1,14 @@
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import { mkdir, access, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
-const directory = fileURLToPath(new URL('../../data/session/', import.meta.url));
+const directory = fileURLToPath(new URL('../../data/session/firefox/', import.meta.url));
 export function createSession(profileDirectory = directory) {
   const marker = `${profileDirectory}/.ready`;
   let setup, launching = false;
   async function open(visible) {
     await mkdir(profileDirectory, { recursive: true, mode: 0o700 });
-    return chromium.launchPersistentContext(profileDirectory, { headless: !visible, viewport: null, timeout: 30000 });
+    return firefox.launchPersistentContext(profileDirectory, { headless: !visible, viewport: null, timeout: 30000 });
   }
   return {
     open,
@@ -37,7 +37,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const readline = createInterface({ input: process.stdin, output: process.stdout });
   try {
     await session.start();
-    await readline.question('Log in manually in Chromium, then press Enter here to save and close. ');
+    await readline.question('Log in manually in Firefox, then press Enter here to save and close. ');
     await session.finish();
     console.log('Session saved.');
   } catch (error) { console.error(error.message); process.exitCode = 1; }

@@ -63,7 +63,7 @@ export async function prepareAuthenticatedTarget({ page, originalTargetUrl, conf
     log('Manual authentication may be required.', 'warning');
     if (!showBrowser) throw failure('Manual verification required. Restart with Show browser enabled or use Login / Setup Session.');
     phase('manual-authentication');
-    log('Complete verification in Chromium within 2 minutes. Stop remains available.', 'warning');
+    log('Complete verification in Firefox within 2 minutes. Stop remains available.', 'warning');
     const deadline = Date.now() + 120000;
     while (await challengeVisible(page)) {
       check();

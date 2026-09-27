@@ -1,5 +1,5 @@
 const $ = id => document.getElementById(id);
-const keys = ['minutes', 'delay', 'mode', 'target', 'retries', 'showBrowser', 'authEnabled', 'usernameSelector', 'passwordSelector', 'loginButtonSelector'];
+const keys = ['minutes', 'delay', 'clickCount', 'clickInterval', 'mode', 'target', 'retries', 'showBrowser', 'authEnabled', 'usernameSelector', 'passwordSelector', 'loginButtonSelector'];
 const checkboxes = ['showBrowser', 'authEnabled'];
 let snapshot, pending = false, lastLog = 0;
 try { const saved = JSON.parse(localStorage.getItem('runner-settings') || '{}'); for (const key of keys) if (key in saved) { if (checkboxes.includes(key)) $(key).checked = saved[key]; else $(key).value = saved[key]; } } catch {}
@@ -7,8 +7,9 @@ function settings() { return Object.fromEntries([...keys, 'urls'].map(key => [ke
 function updateEstimate() {
   const values = settings(), total = values.urls.split(/\r?\n/).filter(s => s.trim()).length;
   $('count').textContent = `Total URLs: ${total}`;
-  const minutes = Math.max(0, Number(values.minutes) || 0) * total;
-  $('estimate').textContent = `Estimated minimum runtime: ~${Math.floor(minutes / 60)}h ${Math.ceil(minutes % 60)}m`;
+  const gapSeconds = Math.max(0, (Number(values.clickCount) || 1) - 1) * Math.max(0, Number(values.clickInterval) || 0);
+  const minutes = Math.ceil((Math.max(0, Number(values.minutes) || 0) + (gapSeconds + Math.max(0, Number(values.delay) || 0)) / 60) * total);
+  $('estimate').textContent = `Estimated minimum runtime: ~${Math.floor(minutes / 60)}h ${minutes % 60}m`;
   delete values.urls;
   try { localStorage.setItem('runner-settings', JSON.stringify(values)); } catch {}
 }
@@ -42,7 +43,7 @@ function error(message) { $('error').textContent = message; $('error').hidden = 
 function render(data) {
   snapshot = data;
   $('status').textContent = data.status.toUpperCase();
-  $('session-status').textContent = data.session.busy ? 'Session setup open — complete login in Chromium' : data.session.available ? '✓ Saved session available (login validity depends on the website)' : 'No saved session yet';
+  $('session-status').textContent = data.session.busy ? 'Session setup open — complete login in Firefox' : data.session.available ? '✓ Saved session available (login validity depends on the website)' : 'No saved session yet';
   $('fields').disabled = data.active;
   $('start').disabled = pending || data.active || data.session.busy;
   $('login').disabled = pending || data.active || data.session.busy;
@@ -53,7 +54,8 @@ function render(data) {
   $('processing').textContent = data.total ? `Processing ${data.index} / ${data.total}` : 'Ready when you are';
   $('current-url').textContent = data.currentUrl || 'Add URLs to begin a sequential run.';
   $('timer').textContent = time(data.remainingMs);
-  $('phase').textContent = data.paused ? 'PAUSED' : data.phase === 'waiting' ? 'TIME REMAINING' : data.phase.toUpperCase();
+  $('click-progress').textContent = `${data.clicksCompleted || 0} / ${data.clickCount || 0} clicks on this page`;
+  $('phase').textContent = data.paused ? 'PAUSED' : data.phase === 'waiting' ? 'TIME REMAINING' : data.phase === 'between-clicks' ? 'NEXT CLICK IN' : data.phase.toUpperCase();
   const processed = data.completed + data.failed.length, percent = data.total ? Math.round(processed / data.total * 100) : 0;
   $('progress').value = percent; $('percent').textContent = `${percent}%`;
   $('progress-label').textContent = `${processed} / ${data.total} processed`;

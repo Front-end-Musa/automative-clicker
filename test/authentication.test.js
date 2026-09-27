@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import { createRunner, validate } from '../src/automation/runner.js';
 import { authFixture } from './helpers/auth-fixture.js';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -11,7 +11,7 @@ async function until(predicate, timeout = 65000) {
 const defaults = { minutes: 5 / 60, delay: 0.1, retries: 2, mode: 'text', target: 'Continue', showBrowser: false };
 async function harness(options) {
   const fixture = await authFixture(options);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await firefox.launch({ headless: true });
   let opens = 0, context;
   const runner = createRunner({ busy: false, async open() { opens++; context = await browser.newContext(); return context; } });
   return { ...fixture, runner, opens: () => opens, page: () => context.pages()[0], close: async () => { await runner.stop(); await browser.close(); await fixture.close(); } };

@@ -10,16 +10,19 @@ export function validate(input) {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error(`Entry ${i + 1}: use HTTP(S) without embedded credentials.`);
   });
   const minutes = Number(input.minutes), delay = Number(input.delay), retries = Number(input.retries);
+  const clickCount = Number(input.clickCount ?? 1), clickInterval = Number(input.clickInterval ?? 2);
+  if (!Number.isInteger(clickCount) || clickCount < 1 || clickCount > 10000) throw new Error('Clicks per page must be an integer from 1 to 10,000.');
+  if (!Number.isFinite(clickInterval) || clickInterval < 0 || clickInterval > 3600) throw new Error('Delay between clicks must be 0–3,600 seconds.');
   if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 10080) throw new Error('Dwell time must be greater than 0 and at most 10,080 minutes.');
   if (!Number.isFinite(delay) || delay < 0 || delay > 3600) throw new Error('Click delay must be 0–3,600 seconds.');
   if (!Number.isInteger(retries) || retries < 0 || retries > 10) throw new Error('Retries must be an integer from 0 to 10.');
   if (!['text', 'css'].includes(input.mode) || typeof input.target !== 'string' || !input.target.trim()) throw new Error('Choose a locator mode and enter a target.');
-  return { authentication: authenticationConfig(input.authentication), urls, dwellMs: minutes * 60 * 1000, delayMs: delay * 1000, retries, mode: input.mode, target: input.target.trim(), showBrowser: input.showBrowser !== false };
+  return { clickCount, clickIntervalMs: clickInterval * 1000, authentication: authenticationConfig(input.authentication), urls, dwellMs: minutes * 60 * 1000, delayMs: delay * 1000, retries, mode: input.mode, target: input.target.trim(), showBrowser: input.showBrowser !== false };
 }
 
 export function createRunner(session) {
   let active = false, stopping = false, paused = false, context, task;
-  let state = { status: 'idle', phase: 'idle', index: 0, total: 0, currentUrl: '', remainingMs: 0, completed: 0, failed: [], logs: [] };
+  let state = { status: 'idle', phase: 'idle', index: 0, total: 0, currentUrl: '', remainingMs: 0, clicksCompleted: 0, clickCount: 0, completed: 0, failed: [], logs: [] };
   let logId = 0;
   let secrets = [];
   function redact(message) {
@@ -86,6 +89,7 @@ export function createRunner(session) {
           let page;
           try {
             state.phase = 'loading'; state.remainingMs = 0;
+            state.clicksCompleted = 0; state.clickCount = settings.clickCount;
             log(`Opening URL ${i + 1}/${settings.urls.length} — attempt ${attempt + 1}`);
             const ctx = await ensureContext(settings);
             await gate();
@@ -108,19 +112,27 @@ export function createRunner(session) {
             log(`Page ready — starting ${settings.dwellMs / 60000}-minute timer`);
             await wait(settings.dwellMs, true, page);
             log('Timer completed');
-            await verifyBeforeTargetClick(page, settings.authentication);
-            await gate();
-            state.phase = 'clicking';
-            const locator = settings.mode === 'text' ? page.getByRole('button', { name: settings.target, exact: true }) : page.locator(settings.target);
-            log(`Looking for ${settings.mode === 'text' ? 'button' : 'selector'} "${settings.target}"`);
-            await locator.waitFor({ state: 'attached', timeout: 10000 });
-            await gate();
-            // Trial performs Playwright actionability checks without clicking.
-            await locator.click({ trial: true, timeout: 10000 });
-            await gate();
-            log('Button found — clicking');
-            await locator.click({ timeout: 10000, noWaitAfter: true });
-            log('Button clicked successfully', 'success');
+            for (let click = 1; click <= settings.clickCount; click++) {
+              await gate();
+              state.phase = 'clicking';
+              await verifyBeforeTargetClick(page, settings.authentication);
+              const locator = settings.mode === 'text' ? page.getByRole('button', { name: settings.target, exact: true }) : page.locator(settings.target);
+              log(`Looking for ${settings.mode === 'text' ? 'button' : 'selector'} "${settings.target}" — click ${click}/${settings.clickCount}`);
+              await locator.waitFor({ state: 'attached', timeout: 10000 });
+              await gate();
+              // Recheck actionability for every click; the DOM may have changed.
+              await locator.click({ trial: true, timeout: 10000 });
+              await gate();
+              await locator.click({ timeout: 10000, noWaitAfter: true });
+              state.clicksCompleted = click;
+              log(`Click ${click}/${settings.clickCount} completed successfully`, 'success');
+              if (click < settings.clickCount) {
+                state.phase = 'between-clicks';
+                log(`Waiting ${settings.clickIntervalMs / 1000} seconds before the next click`);
+                await wait(settings.clickIntervalMs, true, page);
+                await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
+              }
+            }
             state.phase = 'post-click';
             await wait(settings.delayMs);
             state.completed++; reason = undefined;
@@ -132,7 +144,7 @@ export function createRunner(session) {
             if (warning) reason += ` ${warning}`;
             log(`URL ${i + 1} failed: ${reason}`, 'error');
             if (error.authentication) break;
-            if (attempt < settings.retries) log('Retrying this URL from navigation and a fresh dwell timer.', 'warning');
+            if (attempt < settings.retries) log('Retrying this URL from navigation, a fresh dwell timer, and click 1.', 'warning');
           } finally { await page?.close().catch(() => {}); }
         }
         if (reason) state.failed.push({ url: settings.urls[i], reason });
@@ -155,7 +167,7 @@ export function createRunner(session) {
       const settings = validate(input);
       secrets = [settings.authentication.username, settings.authentication.password].filter(Boolean);
       active = true; stopping = false; paused = false;
-      state = { status: 'running', phase: 'starting', index: 0, total: settings.urls.length, currentUrl: '', remainingMs: 0, completed: 0, failed: [], logs: [] };
+      state = { status: 'running', phase: 'starting', index: 0, total: settings.urls.length, currentUrl: '', remainingMs: 0, clicksCompleted: 0, clickCount: 0, completed: 0, failed: [], logs: [] };
       log(`Automation started — ${settings.urls.length} URLs queued`);
       task = run(settings);
     },
